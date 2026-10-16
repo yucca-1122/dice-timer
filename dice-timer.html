@@ -1568,6 +1568,27 @@ input { font: inherit; color: inherit; -webkit-user-select: text; user-select: t
       hold(c, 'sine', 784, t, 0.005, 0.42, 0.12, 0.08);
     } catch (e) { /* 鳴らなくても時計はそのまま */ }
   }
+  // ポポポーン（スタート。3つの音が上がっていく）
+  function playStart() {
+    var c = ready();
+    if (!c) return;
+    try {
+      var t = c.currentTime + 0.004;
+      tone(c, 'sine', 659, 0, t, 0.004, 0.14, 0.24);
+      tone(c, 'sine', 880, 0, t + 0.09, 0.004, 0.14, 0.24);
+      tone(c, 'sine', 1319, 0, t + 0.18, 0.004, 0.42, 0.26);
+    } catch (e) { /* 鳴らなくても時計はそのまま */ }
+  }
+  // ピロン（押して次の人へ＝交代。2つの音が上がる）
+  function playNext() {
+    var c = ready();
+    if (!c) return;
+    try {
+      var t = c.currentTime + 0.004;
+      tone(c, 'sine', 784, 0, t, 0.004, 0.16, 0.26);
+      tone(c, 'sine', 1175, 0, t + 0.075, 0.004, 0.22, 0.26);
+    } catch (e) { /* 同上 */ }
+  }
   // ピピピッ（持ち時間の時間切れ）
   function playTimeout() {
     var c = ready();
@@ -1891,7 +1912,9 @@ input { font: inherit; color: inherit; -webkit-user-select: text; user-select: t
     else if (ev.type === 'count') playPi();
     else if (ev.type === 'timeout') playTimeout();
     else if (ev.type === 'turn' && ev.auto) playZero();
-    // 押して次へ進んだときと 'byo'（秒読みへ）は鳴らさない。色が変わるのが合図
+    else if (ev.type === 'turn' && ev.start) playStart();
+    else if (ev.type === 'turn' && !ev.back) playNext();
+    // ［1人戻す］と 'byo'（秒読みへ）は鳴らさない。色が変わるのが合図
   }
   var raf = 0;
   function timerShown() { return settings.mode !== 'dice'; }
