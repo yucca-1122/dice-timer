@@ -476,7 +476,10 @@ try {
   section('持ち時間の秒読みと時間切れ（時刻を先へ送って確かめる）');
   await setSaved({ mode: 'both', ttype: 'clock', nB: 2, mins: [1, 1, 1, 1, 1, 1], byo: 10, count: 2 });
   await page.reload();
+  const oStartB = await oscNow();
   await page.pressEl('#t-num');
+  await sleep(100);
+  ok('持ち時間: スタートで「ポポポーン」（音の部品3つ）', (await oscNow()) - oStartB === 3, String((await oscNow()) - oStartB));
   await page.eval('window.__skip += 62000; true');
   await sleep(200);
   s = await state();
@@ -499,8 +502,10 @@ try {
   await page.shot('15_持ち時間_時間切れ.png');
   await sleep(1200);
   ok('… 止まったまま（1秒たっても時間切れのまま）', (await state()).phase === 'flagged');
+  const oNextB = await oscNow();
   await page.pressEl('#timer-pane .t-top');
   await sleep(150);
+  ok('持ち時間: 押して次の人へで「ピロン」（音の部品2つ）', (await oscNow()) - oNextB === 2, String((await oscNow()) - oNextB));
   s = await state();
   const chipsOut = await page.eval("[...document.querySelectorAll('#t-list .chip')].map((c) => c.textContent + (c.classList.contains('is-out') ? '*' : ''))");
   ok('押すと次の人（2番）の時計が動き、1番は一覧で「時間切れ」のまま', s.phase === 'running' && s.idx === 1 && chipsOut[1] === '時間切れ*', JSON.stringify([s.phase, s.idx, chipsOut]));
@@ -519,7 +524,10 @@ try {
   await sleep(100);
   ok('全部止まった瞬間に「カタン」を1回だけ作る（音の部品3つ）', (await oscNow()) - o0 === 3, String((await oscNow()) - o0));
   ok('目が出るまで 0.55秒ほど（' + tookRoll + 'ms）', tookRoll >= 500 && tookRoll < 900, String(tookRoll));
+  o0 = await oscNow();
   await page.pressEl('#t-num');
+  await sleep(100);
+  ok('手番: スタートで「ポポポーン」（音の部品3つ）', (await oscNow()) - o0 === 3, String((await oscNow()) - o0));
   await page.eval('window.__skip += 9600; true');
   o0 = await oscNow();
   await page.waitFor("document.getElementById('t-num').textContent === '10'", 2000);
@@ -542,7 +550,12 @@ try {
   o0 = await oscNow();
   await page.pressEl('#timer-pane .t-top');
   await sleep(200);
-  ok('押して次へ進んだときは鳴らさない', (await state()).idx === 0 && (await oscNow()) - o0 === 0, String((await oscNow()) - o0));
+  ok('押して次へ進んだときは「ピロン」（音の部品2つ）', (await state()).idx === 0 && (await oscNow()) - o0 === 2, String((await oscNow()) - o0));
+  await sleep(500);
+  o0 = await oscNow();
+  await page.pressEl('#t-back');
+  await sleep(150);
+  ok('［1人戻す］では鳴らさない', (await oscNow()) - o0 === 0, String((await oscNow()) - o0));
   await setSaved({ mode: 'timer', ttype: 'turn', nA: 3, secs: [10, 20, 30, 20, 20, 20] });
   await page.reload();
   await page.pressEl('#t-num');
