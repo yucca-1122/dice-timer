@@ -263,7 +263,7 @@ try {
   await page.reload();
   let s = await state();
   ok('はじめて開くと「サイコロ」の画面・2個', s.mode === 'dice' && s.dice === 2 && s.count === 2 && s.countText === '2個', JSON.stringify(s));
-  ok('2個は縦に2つ（参考の画面どおり）', s.shape === 'col', s.shape);
+  ok('2個は縦に2つ', s.shape === 'col', s.shape);
   ok('早押しの列の「いつも」の印は2', JSON.stringify(s.usual) === '["quick-2"]', JSON.stringify(s.usual));
   await page.shot('01_サイコロ2個.png');
 
