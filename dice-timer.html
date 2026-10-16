@@ -1,0 +1,2226 @@
+<title>サイコロタイマー</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: 黒い卓の上に白いサイコロ。縦向きは「上の細い帯（いつもの個数・設定）→ サイコロ → 早押しの列」。
+   タイマーを使う画面では上の4割がタイマー欄（横向きは左半分）。画面のふちの線が、今の人の色で上の真ん中から時計回りに減る。 */
+:root {
+  color-scheme: dark;
+  /* 卓と文字 */
+  --bg: #000000;
+  --table-glow: #0d0e11;
+  --fg: #f3f3ef;
+  --muted: #a5a8af;
+  --faint: #7a7d85;
+  --surface: #121316;
+  --surface-2: #1b1c20;
+  --surface-3: #282a2f;
+  --line: #2d2f34;
+  --line-strong: #464950;
+  --accent: #ffd34d;
+  --accent-soft: rgba(255, 211, 77, .2);
+  --focus: #8cc4ff;
+  --danger: #ff5050;
+  --on-danger: #ffffff;
+  --switch-on: #34c46a;
+  --knob: #f3f3ef;
+  --scrim: rgba(0, 0, 0, .62);
+  --sheet: #141518;
+  --sheet-shadow: rgba(0, 0, 0, .7);
+  --ring-track: #1d1e22;
+  /* サイコロ */
+  --die-face: #f9f9f5;
+  --die-hi: #ffffff;
+  --die-lo: #d3d5cf;
+  --die-rim-hi: rgba(255, 255, 255, .95);
+  --die-rim-lo: rgba(60, 66, 78, .38);
+  --die-side: rgba(60, 66, 78, .2);
+  --die-drop: rgba(0, 0, 0, .8);
+  --die-gloss: rgba(255, 255, 255, .85);
+  --pip-hi: #3c3c40;
+  --pip: #070708;
+  --pip-in: rgba(0, 0, 0, .7);
+  --pip-rim: rgba(255, 255, 255, .65);
+  --one-hi: #ff5560;
+  --one: #c0101c;
+  --icon-top: #ffffff;
+  --icon-left: #c9cbc6;
+  --icon-right: #e6e7e3;
+  /* 人の色（黒地で見やすい明るさにそろえた6色） */
+  --p-red: #ff5a52;
+  --p-blue: #4ea1ff;
+  --p-white: #f1f1ec;
+  --p-orange: #ff9a2e;
+  --p-green: #3fd07a;
+  --p-brown: #b67d52;
+  --pc: var(--p-red);   /* 今の人の色（画面側の script が入れ替える） */
+  /* 書体（外から読み込まない。システムの丸ゴシックを先に） */
+  --font-ui: ui-rounded, "Hiragino Maru Gothic ProN", "BIZ UDPGothic", "Yu Gothic UI", "Meiryo", "Noto Sans JP", system-ui, sans-serif;
+  --font-num: ui-rounded, "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Segoe UI", system-ui, sans-serif;
+  /* 寸法 */
+  --bar-h: 52px;
+  --ring-w: 10px;
+  --ring-gap: 3px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html {
+  height: 100%;
+  background: var(--bg);
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.4;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+button:disabled { cursor: default; opacity: .35; }
+input { font: inherit; color: inherit; -webkit-user-select: text; user-select: text; }
+:focus { outline: none; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ===== 全体の割り付け ===== */
+.app {
+  position: relative;
+  height: 100%;
+  display: grid;
+  gap: 10px;
+  padding-block: 8px 12px;
+}
+.app[data-mode="dice"] {
+  grid-template-rows: var(--bar-h) minmax(0, 1fr) auto;
+  grid-template-areas: "bar" "dice" "quick";
+}
+.app[data-mode="both"] {
+  grid-template-rows: var(--bar-h) minmax(0, 4fr) minmax(0, 5fr) auto;
+  grid-template-areas: "bar" "timer" "dice" "quick";
+}
+.app[data-mode="timer"] {
+  grid-template-rows: var(--bar-h) minmax(0, 1fr);
+  grid-template-areas: "bar" "timer";
+}
+/* ふちの線の内側に収める */
+.app[data-mode="both"], .app[data-mode="timer"] {
+  padding-block: calc(var(--ring-w) + var(--ring-gap) + 8px);
+  padding-inline: 6px;
+}
+@media (orientation: landscape) {
+  .app[data-mode="both"] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: var(--bar-h) minmax(0, 1fr) auto;
+    grid-template-areas: "timer bar" "timer dice" "timer quick";
+    column-gap: 18px;
+  }
+}
+
+/* ===== 上の細い帯 ===== */
+.bar {
+  grid-area: bar;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.count { display: flex; align-items: center; gap: 4px; }
+.round-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+}
+.round-btn:active:not(:disabled) { background: var(--surface-3); }
+.count-mid { min-width: 56px; display: grid; justify-items: center; line-height: 1.1; }
+.count-cap { font-size: 11px; color: var(--muted); letter-spacing: .06em; }
+.count-num {
+  font-family: var(--font-num);
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.icon-btn {
+  margin-left: auto;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+}
+.icon-btn:active { background: var(--surface-2); }
+.dice-icon { width: 30px; height: 30px; display: block; }
+.dice-icon .di-top { fill: var(--icon-top); }
+.dice-icon .di-left { fill: var(--icon-left); }
+.dice-icon .di-right { fill: var(--icon-right); }
+.dice-icon .di-pip { fill: var(--pip); }
+.dice-icon .di-one { fill: var(--one); }
+
+/* ===== サイコロ ===== */
+.dice-pane {
+  grid-area: dice;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 24px;
+}
+.dice-stage {
+  position: relative;
+  min-height: 0;
+  border-radius: 28px;
+  background: radial-gradient(closest-side, var(--table-glow), transparent);
+  cursor: pointer;
+}
+.dice-stage:focus-visible { outline-offset: -3px; }
+.once-row { display: grid; place-items: center; min-height: 0; }
+.once-label {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--accent);
+  letter-spacing: .04em;
+}
+.die {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1em;
+  height: 1em;
+  font-size: 120px;
+  border-radius: .2em;
+  background: linear-gradient(170deg, var(--die-hi) 0%, var(--die-face) 30%, var(--die-face) 62%, var(--die-lo) 100%);
+  box-shadow:
+    inset 0 .028em .018em var(--die-rim-hi),
+    inset 0 -.055em .07em var(--die-rim-lo),
+    inset .045em 0 .06em -.03em var(--die-rim-hi),
+    inset -.05em 0 .07em -.03em var(--die-side),
+    0 .07em .14em var(--die-drop),
+    0 .015em .02em var(--die-drop);
+  pointer-events: none;
+  will-change: transform;
+}
+.die::after {
+  content: "";
+  position: absolute;
+  left: 9%;
+  right: 9%;
+  top: 4%;
+  height: 28%;
+  border-radius: .15em .15em 45% 45%;
+  background: linear-gradient(to bottom, var(--die-gloss), transparent);
+  opacity: .55;
+}
+.pip {
+  position: absolute;
+  display: none;
+  width: .19em;
+  height: .19em;
+  margin: -.095em 0 0 -.095em;
+  border-radius: 50%;
+  background: radial-gradient(circle at 42% 36%, var(--pip-hi), var(--pip) 58%);
+  box-shadow: inset 0 .014em .02em var(--pip-in), 0 .008em .006em var(--pip-rim);
+}
+.pip.tl { left: 27%; top: 27%; }
+.pip.tr { left: 73%; top: 27%; }
+.pip.ml { left: 27%; top: 50%; }
+.pip.c  { left: 50%; top: 50%; }
+.pip.mr { left: 73%; top: 50%; }
+.pip.bl { left: 27%; top: 73%; }
+.pip.br { left: 73%; top: 73%; }
+.die[data-face="1"] .c {
+  display: block;
+  width: .33em;
+  height: .33em;
+  margin: -.165em 0 0 -.165em;
+  background: radial-gradient(circle at 42% 36%, var(--one-hi), var(--one) 62%);
+}
+.die[data-face="2"] :is(.tr, .bl),
+.die[data-face="3"] :is(.tr, .c, .bl),
+.die[data-face="4"] :is(.tl, .tr, .bl, .br),
+.die[data-face="5"] :is(.tl, .tr, .c, .bl, .br),
+.die[data-face="6"] :is(.tl, .tr, .ml, .mr, .bl, .br) { display: block; }
+
+/* ===== 早押しの列 ===== */
+.quick {
+  grid-area: quick;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+.q-btn {
+  position: relative;
+  min-height: 60px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-num);
+  font-size: 26px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transition: border-color .15s, box-shadow .15s, color .15s;
+}
+.q-btn:active { background: var(--surface-2); }
+.q-n { display: block; }
+.q-btn.is-usual { border-color: var(--line-strong); }
+.q-btn.is-usual .q-n { transform: translateY(-6px); }
+.q-tag {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 6px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: .02em;
+}
+.q-btn[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 0 20px var(--accent-soft);
+}
+.q-btn[aria-pressed="true"] .q-tag { color: var(--accent); }
+
+/* ===== タイマー欄 ===== */
+.timer-pane {
+  grid-area: timer;
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px 12px;
+  border-radius: 22px;
+  background: var(--surface);
+  background: color-mix(in srgb, var(--pc) 9%, var(--surface));
+  border: 1px solid var(--line);
+  border-color: color-mix(in srgb, var(--pc) 34%, var(--line));
+  cursor: pointer;
+}
+.app[data-mode="timer"] .timer-pane {
+  background: transparent;
+  border-color: transparent;
+  padding: 0 2px;
+}
+.t-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+.t-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--pc);
+}
+.t-dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--pc);
+}
+.t-round {
+  flex: none;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.t-numbox {
+  flex: 1 1 0;
+  container-type: size;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.t-next {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+}
+.t-next:focus-visible { outline-offset: -3px; }
+.t-num {
+  --k: 62;
+  display: block;
+  font-family: var(--font-num);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--pc);
+  font-size: 96px;
+  font-size: min(calc(var(--k) * 1cqw), 88cqh);
+}
+.t-num[data-shape="m1"] { --k: 38; }
+.t-num[data-shape="m2"] { --k: 29; }
+.t-num[data-shape="h"] { --k: 22; }
+.t-num[data-shape="txt"] { --k: 19; letter-spacing: 0; }
+/* タイマーだけの画面は、数字を画面いっぱいに */
+.app[data-mode="timer"] .t-num { --k: 72; }
+.app[data-mode="timer"] .t-num[data-shape="m1"] { --k: 43; }
+.app[data-mode="timer"] .t-num[data-shape="m2"] { --k: 33; }
+.app[data-mode="timer"] .t-num[data-shape="h"] { --k: 25; }
+.app[data-mode="timer"] .t-num[data-shape="txt"] { --k: 22; }
+.app[data-mode="timer"] .t-who { font-size: 22px; }
+.app[data-mode="timer"] .t-dot { width: 18px; height: 18px; }
+.app[data-mode="timer"] .t-round { font-size: 17px; }
+.app[data-mode="timer"] .t-hint, .app[data-mode="timer"] .t-list, .app[data-mode="timer"] .t-sub { font-size: 16px; }
+.t-hint {
+  flex: none;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--fg);
+  min-height: 20px;
+}
+.t-list {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.app[data-phase="idle"] .t-hint { color: var(--pc); font-size: 16px; }
+.app[data-phase="paused"] .t-hint,
+.app[data-phase="flagged"] .t-hint { color: var(--accent); }
+.t-top, .t-foot { flex: none; }
+.t-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+}
+.t-sub {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.chip { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.chip-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--p-red); }
+.chip.is-out { color: var(--danger); }
+.t-btns { flex: none; display: flex; gap: 6px; }
+.small-btn {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 22px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.small-btn:active:not(:disabled) { background: var(--surface-3); }
+.app[data-phase="paused"] .t-num { opacity: .5; }
+.app[data-out="1"] .t-num { color: var(--danger); }
+.app[data-blink="off"] .t-num { opacity: .2; }
+
+/* ===== 画面のふちの線 ===== */
+.ring-wrap {
+  position: fixed;
+  top: env(safe-area-inset-top, 0px);
+  bottom: env(safe-area-inset-bottom, 0px);
+  left: env(safe-area-inset-left, 0px);
+  right: env(safe-area-inset-right, 0px);
+  pointer-events: none;
+  z-index: 1;
+}
+.ring { display: block; width: 100%; height: 100%; overflow: visible; }
+.ring-track { fill: none; stroke: var(--ring-track); stroke-width: var(--ring-w); }
+.ring-bar {
+  fill: none;
+  stroke: var(--pc);
+  stroke-width: var(--ring-w);
+  stroke-linecap: butt;
+  stroke-dasharray: 1000 1000;
+  stroke-dashoffset: 0;
+}
+.app[data-phase="idle"] .ring-bar { opacity: .5; }
+.app[data-phase="paused"] .ring-bar { opacity: .35; }
+.app[data-blink="off"] .ring-bar { opacity: .15; }
+
+/* ===== 設定シート ===== */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  background: var(--scrim);
+}
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  max-width: 620px;
+  max-height: 88%;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 22px 22px 0 0;
+  box-shadow: 0 -12px 40px var(--sheet-shadow);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  transform: translateY(105%);
+  transition: transform .26s cubic-bezier(.2, .8, .2, 1);
+}
+.sheet.open { transform: none; }
+.sheet-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 12px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.sheet-head h2 { margin: 0; font-size: 18px; font-weight: 800; }
+.sheet-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  gap: 20px;
+  padding-block: 14px 20px;
+}
+.pill-btn {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 22px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-weight: 700;
+}
+.field { margin: 0; padding: 0; border: 0; min-width: 0; display: grid; gap: 8px; }
+.f-title {
+  padding: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--muted);
+  letter-spacing: .06em;
+}
+.f-note { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--faint); }
+.timer-fields { display: grid; gap: 20px; }
+.seg {
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.seg input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.seg label {
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 4px 6px;
+  border-radius: 10px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--muted);
+  cursor: pointer;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.seg input:checked + label { background: var(--fg); color: var(--bg); }
+.seg input:focus-visible + label { outline: 3px solid var(--focus); outline-offset: 1px; }
+.seg input:disabled + label { opacity: .3; cursor: default; }
+.sw-list { gap: 0; }
+.sw-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding-block: 6px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.sw-text { display: grid; gap: 2px; font-weight: 700; }
+.sw-text small { font-size: 12px; font-weight: 400; color: var(--faint); line-height: 1.45; }
+.sw {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 52px;
+  height: 32px;
+  margin: 0;
+  border-radius: 16px;
+  background: var(--surface-3);
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.sw::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--knob);
+  transition: transform .15s;
+}
+.sw:checked { background: var(--switch-on); border-color: var(--switch-on); }
+.sw:checked::after { transform: translateX(20px); }
+.p-list { display: grid; gap: 8px; }
+.p-row {
+  display: grid;
+  grid-template-columns: 58px 48px minmax(0, 1fr) 48px 22px;
+  align-items: center;
+  gap: 6px;
+}
+.p-color {
+  height: 48px;
+  border-radius: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--font-num);
+  font-weight: 800;
+  font-size: 16px;
+}
+.p-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--c, var(--p-red));
+  box-shadow: 0 0 0 2px var(--surface-3);
+}
+.step {
+  height: 48px;
+  border-radius: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.step:active, .p-color:active { background: var(--surface-3); }
+.p-time {
+  width: 100%;
+  min-width: 0;
+  height: 48px;
+  padding: 0 4px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  text-align: center;
+  font-family: var(--font-num);
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.p-time::-webkit-inner-spin-button, .p-time::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.p-time:focus-visible { outline-offset: 0; }
+.p-unit { font-size: 13px; color: var(--muted); }
+.sheet-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.btn-primary, .btn-secondary {
+  min-height: 52px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+.btn-primary { background: var(--fg); color: var(--bg); }
+.btn-secondary { background: var(--surface-2); border: 1px solid var(--line-strong); }
+.btn-primary[data-armed], .btn-secondary[data-armed] { background: var(--danger); border-color: var(--danger); color: var(--on-danger); }
+.confirm-note { color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet, .sw, .sw::after, .q-btn { transition: none; }
+}
+</style>
+
+<div id="app" class="app" data-mode="dice" data-phase="idle">
+  <div id="ring-wrap" class="ring-wrap" aria-hidden="true" hidden>
+    <svg id="ring" class="ring" focusable="false"><path id="ring-track" class="ring-track"/><path id="ring-bar" class="ring-bar" pathLength="1000"/></svg>
+  </div>
+
+  <header id="bar" class="bar">
+    <div id="count-box" class="count" role="group" aria-label="いつもの個数" data-no-roll>
+      <button type="button" id="count-minus" class="round-btn" aria-label="いつもの個数を1つ減らす"><span aria-hidden="true">−</span></button>
+      <div class="count-mid"><span class="count-cap" aria-hidden="true">いつも</span><output id="count-num" class="count-num" aria-live="polite">2個</output></div>
+      <button type="button" id="count-plus" class="round-btn" aria-label="いつもの個数を1つ増やす"><span aria-hidden="true">＋</span></button>
+    </div>
+    <button type="button" id="open-settings" class="icon-btn" aria-label="設定を開く" aria-haspopup="dialog" aria-controls="sheet">
+      <svg class="dice-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+        <path class="di-top" d="M16 3.5 27.5 9.6 16 15.7 4.5 9.6Z"/>
+        <path class="di-left" d="M4.5 9.6 16 15.7V28.5L4.5 22.4Z"/>
+        <path class="di-right" d="M27.5 9.6V22.4L16 28.5V15.7Z"/>
+        <ellipse class="di-one" cx="16" cy="9.6" rx="2.5" ry="1.35"/>
+        <circle class="di-pip" cx="13.1" cy="17.4" r="1.25"/>
+        <circle class="di-pip" cx="7.4" cy="20.7" r="1.25"/>
+        <circle class="di-pip" cx="24.6" cy="14.3" r="1.2"/>
+        <circle class="di-pip" cx="21.75" cy="19.05" r="1.2"/>
+        <circle class="di-pip" cx="18.9" cy="23.8" r="1.2"/>
+      </svg>
+    </button>
+  </header>
+
+  <section id="timer-pane" class="timer-pane" aria-label="タイマー" hidden>
+    <div class="t-top">
+      <span class="t-who"><i class="t-dot" aria-hidden="true"></i><span id="t-who" aria-live="polite">赤の番</span></span>
+      <span id="t-round" class="t-round">1周目</span>
+    </div>
+    <div class="t-numbox">
+      <button type="button" id="t-next" class="t-next" aria-label="スタート"><span id="t-num" class="t-num" data-shape="s2">20</span></button>
+    </div>
+    <div id="t-list" class="t-list" aria-label="ほかの人の残り" hidden></div>
+    <div id="t-hint" class="t-hint">タップでスタート</div>
+    <div class="t-foot">
+      <div id="t-sub" class="t-sub"></div>
+      <div class="t-btns">
+        <button type="button" id="t-back" class="small-btn">1人戻す</button>
+        <button type="button" id="t-pause" class="small-btn">一時停止</button>
+      </div>
+    </div>
+  </section>
+
+  <main id="dice-pane" class="dice-pane">
+    <div id="dice-stage" class="dice-stage" role="button" tabindex="0" aria-label="サイコロを振る" data-count="0" data-rolls="0"></div>
+    <div class="once-row"><p id="once-label" class="once-label" hidden></p></div>
+  </main>
+
+  <nav id="quick" class="quick" aria-label="この回だけの個数で振る" data-no-roll></nav>
+</div>
+
+<p id="sr-live" class="sr-only" aria-live="polite"></p>
+
+<div id="scrim" class="scrim" hidden></div>
+<section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden>
+  <div class="sheet-head">
+    <h2 id="sheet-title">設定</h2>
+    <button type="button" id="sheet-close" class="pill-btn">閉じる</button>
+  </div>
+  <div class="sheet-body">
+    <fieldset class="field">
+      <legend class="f-title">画面</legend>
+      <div class="seg">
+        <input type="radio" name="mode" id="mode-dice" value="dice"><label for="mode-dice">サイコロ</label>
+        <input type="radio" name="mode" id="mode-both" value="both"><label for="mode-both">サイコロ＋<wbr>タイマー</label>
+        <input type="radio" name="mode" id="mode-timer" value="timer"><label for="mode-timer">タイマー</label>
+      </div>
+    </fieldset>
+
+    <div class="field sw-list">
+      <label class="sw-row" for="opt-sound"><span class="sw-text">音を出す<small>オフにすると、サイコロもタイマーも鳴りません</small></span><input type="checkbox" id="opt-sound" class="sw"></label>
+      <label class="sw-row" id="row-dice-sound" for="opt-dice-sound"><span class="sw-text">サイコロの音<small>止まった瞬間の「カタン」</small></span><input type="checkbox" id="opt-dice-sound" class="sw"></label>
+      <label class="sw-row" for="opt-silent"><span class="sw-text">マナーモードでも鳴らす<small>iPhone 用。ほかのアプリの音楽が止まることがあります</small></span><input type="checkbox" id="opt-silent" class="sw"></label>
+    </div>
+
+    <div id="timer-fields" class="timer-fields">
+      <fieldset class="field">
+        <legend class="f-title">タイマーの種類</legend>
+        <div class="seg">
+          <input type="radio" name="ttype" id="ttype-turn" value="turn"><label for="ttype-turn">手番（くり返し）</label>
+          <input type="radio" name="ttype" id="ttype-clock" value="clock"><label for="ttype-clock">持ち時間（将棋式）</label>
+        </div>
+        <p id="ttype-note" class="f-note"></p>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend class="f-title">人数</legend>
+        <div class="seg">
+          <input type="radio" name="players" id="players-1" value="1"><label for="players-1">1</label>
+          <input type="radio" name="players" id="players-2" value="2"><label for="players-2">2</label>
+          <input type="radio" name="players" id="players-3" value="3"><label for="players-3">3</label>
+          <input type="radio" name="players" id="players-4" value="4"><label for="players-4">4</label>
+          <input type="radio" name="players" id="players-5" value="5"><label for="players-5">5</label>
+          <input type="radio" name="players" id="players-6" value="6"><label for="players-6">6</label>
+        </div>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend id="times-title" class="f-title">1人ずつの秒数</legend>
+        <p class="f-note">左の色を押すと、その人の色が変わります（ほかの人と重ならない色に）</p>
+        <div id="p-list" class="p-list"></div>
+      </fieldset>
+
+      <fieldset id="byo-field" class="field">
+        <legend class="f-title">秒読み</legend>
+        <div class="seg">
+          <input type="radio" name="byo" id="byo-0" value="0"><label for="byo-0">なし</label>
+          <input type="radio" name="byo" id="byo-10" value="10"><label for="byo-10">10秒</label>
+          <input type="radio" name="byo" id="byo-30" value="30"><label for="byo-30">30秒</label>
+          <input type="radio" name="byo" id="byo-60" value="60"><label for="byo-60">60秒</label>
+        </div>
+        <p class="f-note">持ち時間が0になった人は、それから毎手番この秒数。なしのときは、0で時間切れ</p>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend class="f-title">残りのカウント</legend>
+        <div class="seg">
+          <input type="radio" name="countfrom" id="count-3" value="3"><label for="count-3">3・2・1</label>
+          <input type="radio" name="countfrom" id="count-5" value="5"><label for="count-5">5・4・3・2・1</label>
+        </div>
+        <p class="f-note">この秒数から、ふちの線と数字が点滅して「ピッ」と鳴ります</p>
+      </fieldset>
+
+      <div class="field sw-list">
+        <label class="sw-row" for="opt-half"><span class="sw-text">半分の音<small>残りが半分になったら「ポーン」</small></span><input type="checkbox" id="opt-half" class="sw"></label>
+      </div>
+
+      <p id="clock-note" class="f-note confirm-note" hidden>持ち時間の変更は［この設定で始める］か［最初から］で入ります</p>
+      <div class="sheet-actions">
+        <button type="button" id="apply-start" class="btn-primary">この設定で始める</button>
+        <button type="button" id="reset-timer" class="btn-secondary">最初から</button>
+      </div>
+      <p id="confirm-note" class="f-note confirm-note" hidden>もう一度押すと、タイマーが1番・スタート前に戻ります</p>
+      <p class="f-note">人数や秒数をゲームの途中で変えたら、次の手番から変わります</p>
+    </div>
+
+    <p id="wake-status" class="f-note">画面を消さない: 最初に画面を押すと有効になります</p>
+  </div>
+</section>
+
+<script id="engine">
+/* サイコロタイマーの中身（画面には触らない）。
+   時刻はすべて呼ぶ側から渡す（ミリ秒。画面では performance.now() のもの、テストでは好きな値）ので、時間を早送りして試せる。 */
+(function (root) {
+  'use strict';
+
+  var LATE_MS = 300;    // これより前に過ぎた音の合図は捨てる（画面が隠れて戻ったときに、まとめて鳴らさない）
+  var GUARD_MS = 400;   // スタート・再開・次へ・0秒の切り替えから、この間の「次へ」は無視する（連打で2人飛ばない）
+
+  function clampInt(v, lo, hi, fb) {
+    if (v === null || v === undefined || v === '') return fb;
+    var n = Math.round(Number(v));
+    if (!Number.isFinite(n)) return fb;
+    return Math.min(hi, Math.max(lo, n));
+  }
+
+  /* ---------- 乱数（crypto.getRandomValues。はみ出しを捨てる取り方なので偏りがない） ---------- */
+  function cryptoFill(arr) {
+    var c = root.crypto;
+    if (c && typeof c.getRandomValues === 'function') return c.getRandomValues(arr);
+    for (var i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 0x100000000);   // 使えない環境だけの予備
+    return arr;
+  }
+  var word = new Uint32Array(1);
+  function randomInt(n, fill) {   // 0〜n-1
+    n = Math.floor(n);
+    if (!(n >= 1 && n <= 0x100000000)) throw new RangeError('randomInt: n は 1〜2^32');
+    var limit = 0x100000000 - (0x100000000 % n);   // これ以上の値は n で割り切れない端数なので捨てる
+    var f = fill || cryptoFill;
+    for (var tries = 0; tries < 1000; tries++) {
+      f(word);
+      if (word[0] < limit) return word[0] % n;
+    }
+    return word[0] % n;
+  }
+  function rollDie(fill) { return randomInt(6, fill) + 1; }
+
+  /* ---------- 並べ方（あいている場所に収まる最大の大きさ。上限つき） ---------- */
+  var SHAPES = {
+    1: [{ name: 'one', dir: 'rows', lines: [1] }],
+    2: [{ name: 'col', dir: 'rows', lines: [1, 1] }, { name: 'row', dir: 'rows', lines: [2] }],
+    3: [{ name: 'triangle', dir: 'rows', lines: [1, 2] }, { name: 'row', dir: 'rows', lines: [3] }],
+    4: [{ name: 'square', dir: 'rows', lines: [2, 2] }],
+    5: [{ name: 'five', dir: 'rows', lines: [2, 1, 2] }, { name: 'five-wide', dir: 'cols', lines: [2, 1, 2] }],
+    6: [{ name: 'tall', dir: 'rows', lines: [2, 2, 2] }, { name: 'wide', dir: 'rows', lines: [3, 3] }]
+  };
+  function layoutDice(n, W, H, opts) {
+    var o = opts || {};
+    var gapK = o.gap != null ? o.gap : 0.3;      // すき間＝大きさ×これ
+    var padK = o.pad != null ? o.pad : 0.1;      // はずむ分の余白（大きさ×これを外側に）
+    var maxSize = o.maxSize > 0 ? o.maxSize : Infinity;
+    n = clampInt(n, 1, 6, 1);
+    var shapes = SHAPES[n];
+    if (o.only) {
+      var only = shapes.filter(function (s) { return s.name === o.only; });
+      if (only.length) shapes = only;
+    }
+    var best = null;
+    shapes.forEach(function (sh) {
+      var lines = sh.lines.length, most = Math.max.apply(null, sh.lines);
+      var across = sh.dir === 'rows' ? most : lines;
+      var down = sh.dir === 'rows' ? lines : most;
+      var s = Math.min(W / (across + (across - 1) * gapK + 2 * padK), H / (down + (down - 1) * gapK + 2 * padK));
+      if (!best || s > best.s * 1.02) best = { sh: sh, s: s };   // ほぼ同じなら先の形（縦に2つなど）
+    });
+    var size = Math.max(0, Math.min(best.s, maxSize));
+    var gap = size * gapK, step = size + gap, items = [], sh = best.sh;
+    var span = function (k) { return k * size + (k - 1) * gap; };
+    if (sh.dir === 'rows') {
+      var top = (H - span(sh.lines.length)) / 2;
+      sh.lines.forEach(function (cnt, r) {
+        var left = (W - span(cnt)) / 2;
+        for (var i = 0; i < cnt; i++) items.push({ x: left + i * step + size / 2, y: top + r * step + size / 2 });
+      });
+    } else {
+      var left0 = (W - span(sh.lines.length)) / 2;
+      sh.lines.forEach(function (cnt, c) {
+        var top0 = (H - span(cnt)) / 2;
+        for (var i = 0; i < cnt; i++) items.push({ x: left0 + c * step + size / 2, y: top0 + i * step + size / 2 });
+      });
+    }
+    return { size: size, gap: gap, shape: sh.name, items: items };
+  }
+
+  /* ---------- 時間の書き方 ---------- */
+  function pad2(n) { return n < 10 ? '0' + n : String(n); }
+  // style 'turn': 60秒未満は秒だけ・60秒以上は m:ss ／ 'clock': いつも m:ss。どちらも1時間以上は h:mm:ss
+  function formatTime(ms, style) {
+    var s = Math.max(0, Math.ceil(ms / 1000));
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    if (h > 0) return h + ':' + pad2(m) + ':' + pad2(sec);
+    if (style === 'clock' || s >= 60) return m + ':' + pad2(sec);
+    return String(s);
+  }
+
+  /* ---------- 音の合図（残りがこの値を切ったら鳴らす） ---------- */
+  // 半分: 長さの半分が、カウントの始まりより長いときだけ／カウント: 手番の始まりと重なるものは鳴らさない
+  function cueList(lenMs, countFrom) {
+    var list = [];
+    if (lenMs / 2 > countFrom * 1000) list.push({ r: lenMs / 2, type: 'half' });
+    for (var k = countFrom; k >= 1; k--) if (k * 1000 < lenMs) list.push({ r: k * 1000, type: 'count', n: k });
+    return list;
+  }
+  function crossed(list, lastRem, r1, end, keepFrom, idx, extra, out) {
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      if (c.r < lastRem && c.r >= r1) {
+        var at = end - c.r;
+        if (at > keepFrom) {
+          var ev = { type: c.type, idx: idx, at: at };
+          if (c.n) ev.n = c.n;
+          if (extra) for (var k in extra) ev[k] = extra[k];
+          out.push(ev);
+        }
+      }
+    }
+  }
+  function nextOf(i, n) { return i + 1 >= n ? 0 : i + 1; }
+  function prevOf(i, n) { return i >= n ? n - 1 : (i === 0 ? n - 1 : i - 1); }
+
+  /* ---------- A. 手番タイマー（くり返し） ---------- */
+  function TurnTimer(cfg, opts) {
+    var o = opts || {};
+    this.kind = 'turn';
+    this.lateMs = o.lateMs != null ? o.lateMs : LATE_MS;
+    this.guardMs = o.guardMs != null ? o.guardMs : GUARD_MS;
+    this.cfg = { n: 4, secs: [20, 20, 20, 20, 20, 20], countFrom: 3 };
+    this.phase = 'idle';
+    this.setConfig(cfg || {});
+    this.reset();
+  }
+  TurnTimer.prototype = {
+    // 人数・秒数は次の手番から（今の手番はそのまま）。カウントの長さはすぐ
+    setConfig: function (cfg) {
+      var c = this.cfg;
+      if (cfg.n != null) c.n = clampInt(cfg.n, 1, 6, c.n);
+      if (cfg.secs) c.secs = c.secs.map(function (d, i) { return clampInt(cfg.secs[i], 1, 999, d); });
+      if (cfg.countFrom != null) c.countFrom = Number(cfg.countFrom) === 5 ? 5 : 3;
+      if (this.phase === 'idle') this._idle();
+      else this.cues = cueList(this.dur, c.countFrom);
+    },
+    _idle: function () {
+      this.idx = 0;
+      this.dur = this.cfg.secs[0] * 1000;
+      this.rem = this.dur;
+      this.lastRem = this.dur;
+      this.cues = cueList(this.dur, this.cfg.countFrom);
+    },
+    reset: function () {
+      this.phase = 'idle';
+      this.round = 1;
+      this.end = 0;
+      this.guardAt = -Infinity;
+      this.queue = [];
+      this._idle();
+    },
+    nextIndex: function (i) { return nextOf(i, this.cfg.n); },
+    prevIndex: function (i) { return prevOf(i, this.cfg.n); },
+    _begin: function (i, at) {
+      this.idx = i;
+      this.dur = this.cfg.secs[i] * 1000;
+      this.end = at + this.dur;
+      this.rem = this.dur;
+      this.lastRem = this.dur;
+      this.cues = cueList(this.dur, this.cfg.countFrom);
+    },
+    _cycleMs: function () {
+      var s = 0;
+      for (var i = 0; i < this.cfg.n; i++) s += this.cfg.secs[i] * 1000;
+      return s;
+    },
+    _sync: function (now) {
+      if (this.phase !== 'running') return;
+      var keepFrom = now - this.lateMs;
+      for (var guard = 0; guard < 100000; guard++) {
+        var left = this.end - now;
+        var r1 = left > 0 ? left : 0;
+        crossed(this.cues, this.lastRem, r1, this.end, keepFrom, this.idx, null, this.queue);
+        this.lastRem = r1;
+        this.rem = r1;
+        if (left > 0) return;
+        // 0秒: すぐ次の人の秒数で始まる（ここでは音を出さない）
+        var at = this.end, nx = this.nextIndex(this.idx);
+        if (nx === 0) this.round++;
+        this._begin(nx, at);
+        this.guardAt = at;
+        if (at > keepFrom) this.queue.push({ type: 'turn', idx: nx, at: at, auto: true });
+        // 長く隠れていたら、まるごと回った周は一度に飛ばす
+        var cyc = this._cycleMs();
+        if (now - this.end > cyc * 2) {
+          var k = Math.floor((now - this.end) / cyc) - 1;
+          this.end += k * cyc;
+          this.round += k;
+        }
+      }
+    },
+    tick: function (now) {
+      this._sync(now);
+      var keep = now - this.lateMs;
+      var out = this.queue.filter(function (e) { return e.at > keep; });
+      this.queue = [];
+      return out;
+    },
+    start: function (now) {
+      if (this.phase !== 'idle') return false;
+      this.phase = 'running';
+      this.round = 1;
+      this._begin(0, now);
+      this.guardAt = now;
+      this.queue.push({ type: 'turn', idx: 0, at: now, start: true });
+      return true;
+    },
+    // タイマー欄を押したとき: スタート前ならスタート／一時停止中なら再開／動いていれば次へ
+    tap: function (now) {
+      this._sync(now);
+      if (this.phase === 'idle') return this.start(now) ? 'start' : 'ignored';
+      if (this.phase === 'paused') return this.resume(now) ? 'resume' : 'ignored';
+      return this.next(now) ? 'next' : 'ignored';
+    },
+    next: function (now) {
+      this._sync(now);
+      if (this.phase !== 'running' || now - this.guardAt < this.guardMs) return false;
+      var nx = this.nextIndex(this.idx);
+      if (nx === 0) this.round++;
+      this._begin(nx, now);   // 余った秒は捨てる
+      this.guardAt = now;
+      this.queue.push({ type: 'turn', idx: nx, at: now });
+      return true;
+    },
+    // 1人戻す: 前の人の秒数の最初から（1番から戻すと最後の人・周も1つ戻す）
+    back: function (now) {
+      this._sync(now);
+      if (this.phase === 'idle') return false;
+      var was = this.idx, pv = this.prevIndex(was);
+      if (was === 0) this.round = Math.max(1, this.round - 1);
+      if (this.phase === 'paused') {
+        this.idx = pv;
+        this.dur = this.cfg.secs[pv] * 1000;
+        this.rem = this.dur;
+        this.lastRem = this.dur;
+        this.cues = cueList(this.dur, this.cfg.countFrom);
+      } else {
+        this._begin(pv, now);
+      }
+      this.queue.push({ type: 'turn', idx: pv, at: now, back: true });
+      return true;
+    },
+    pause: function (now) {
+      this._sync(now);
+      if (this.phase !== 'running') return false;
+      this.rem = Math.max(0, this.end - now);
+      this.lastRem = this.rem;
+      this.phase = 'paused';
+      return true;
+    },
+    resume: function (now) {
+      if (this.phase !== 'paused') return false;
+      this.end = now + this.rem;
+      this.phase = 'running';
+      this.guardAt = now;
+      return true;
+    },
+    togglePause: function (now) { return this.phase === 'paused' ? this.resume(now) : this.pause(now); },
+    view: function (now) {
+      this._sync(now);
+      var c = this.cfg;
+      var remain = this.phase === 'running' ? Math.max(0, this.end - now) : this.rem;
+      var nx = this.nextIndex(this.idx);
+      return {
+        kind: 'turn', phase: this.phase, idx: this.idx, n: c.n, round: this.round,
+        remain: remain, len: this.dur, frac: this.dur > 0 ? remain / this.dur : 0,
+        nextIdx: nx, nextLen: c.secs[nx] * 1000,
+        warn: this.phase === 'running' && remain <= c.countFrom * 1000,
+        countFrom: c.countFrom
+      };
+    }
+  };
+
+  /* ---------- B. 持ち時間（将棋式） ---------- */
+  function ClockTimer(cfg, opts) {
+    var o = opts || {};
+    this.kind = 'clock';
+    this.lateMs = o.lateMs != null ? o.lateMs : LATE_MS;
+    this.guardMs = o.guardMs != null ? o.guardMs : GUARD_MS;
+    this.cfg = { n: 4, mins: [10, 10, 10, 10, 10, 10], byo: 0, countFrom: 3 };
+    this.phase = 'idle';
+    this.setConfig(cfg || {});
+    this.reset();
+  }
+  ClockTimer.prototype = {
+    // 人数・秒読みは次の手番から。持ち時間（分）はスタート前ならすぐ、始まってからは reset（最初から）で入る
+    setConfig: function (cfg) {
+      var c = this.cfg;
+      if (cfg.n != null) c.n = clampInt(cfg.n, 2, 6, c.n);
+      if (cfg.mins) c.mins = c.mins.map(function (d, i) { return clampInt(cfg.mins[i], 1, 180, d); });
+      if (cfg.byo != null) { var b = Number(cfg.byo); c.byo = (b === 10 || b === 30 || b === 60) ? b : 0; }
+      if (cfg.countFrom != null) c.countFrom = Number(cfg.countFrom) === 5 ? 5 : 3;
+      if (this.phase === 'idle') this._fill();
+      else this.cues = cueList(this.len, c.countFrom);
+    },
+    _fill: function () {
+      this.budget = this.cfg.mins.map(function (m) { return m * 60000; });
+      this.main = this.budget.slice();
+      this.inByo = [false, false, false, false, false, false];
+      this.out = [false, false, false, false, false, false];
+      this.idx = 0;
+      this.len = this.budget[0];
+      this.rem = this.main[0];
+      this.lastRem = this.rem;
+      this.cues = cueList(this.len, this.cfg.countFrom);
+    },
+    reset: function () {
+      this.phase = 'idle';
+      this.round = 1;
+      this.end = 0;
+      this.snap = null;
+      this.guardAt = -Infinity;
+      this.queue = [];
+      this._fill();
+    },
+    nextIndex: function (i) { return nextOf(i, this.cfg.n); },
+    prevIndex: function (i) { return prevOf(i, this.cfg.n); },
+    _byoMs: function () { return this.cfg.byo * 1000; },
+    // i の人の時計を at から動かす用意（秒読みは手番ごとに元の秒数に戻る）
+    _load: function (i, at) {
+      this.idx = i;
+      this.snap = { idx: i, main: this.main[i], inByo: this.inByo[i], out: this.out[i] };
+      if (this.out[i]) {
+        this.len = this.budget[i];
+        this.rem = 0;
+        this.lastRem = 0;
+        this.end = at;
+        this.cues = [];
+        return;
+      }
+      this.len = this.inByo[i] ? this._byoMs() : this.budget[i];
+      this.rem = this.inByo[i] ? this.len : this.main[i];
+      this.lastRem = this.rem;
+      this.end = at + this.rem;
+      this.cues = cueList(this.len, this.cfg.countFrom);
+    },
+    _sync: function (now) {
+      if (this.phase !== 'running') return;
+      var keepFrom = now - this.lateMs;
+      for (var guard = 0; guard < 4; guard++) {
+        var i = this.idx;
+        if (this.out[i]) return;   // 時間切れの人の番: 時計は動かない（押すと次の人へ）
+        var left = this.end - now;
+        var r1 = left > 0 ? left : 0;
+        crossed(this.cues, this.lastRem, r1, this.end, keepFrom, i, { byo: this.inByo[i] }, this.queue);
+        this.lastRem = r1;
+        this.rem = r1;
+        if (!this.inByo[i]) this.main[i] = r1;
+        if (left > 0) return;
+        var at = this.end;
+        if (!this.inByo[i] && this._byoMs() > 0) {
+          // 持ち時間が0: 秒読みへ（切り替わりでは鳴らさない）
+          this.inByo[i] = true;
+          this.main[i] = 0;
+          this.len = this._byoMs();
+          this.rem = this.len;
+          this.lastRem = this.len;
+          this.end = at + this.len;
+          this.cues = cueList(this.len, this.cfg.countFrom);
+          if (at > keepFrom) this.queue.push({ type: 'byo', idx: i, at: at });
+          continue;
+        }
+        // 時間切れ: 時計を止める。押すと次の人へ。この人は以後ずっと時間切れ
+        this.main[i] = 0;
+        this.out[i] = true;
+        this.rem = 0;
+        this.lastRem = 0;
+        this.phase = 'flagged';
+        if (at > keepFrom) this.queue.push({ type: 'timeout', idx: i, at: at });
+        return;
+      }
+    },
+    tick: TurnTimer.prototype.tick,
+    start: function (now) {
+      if (this.phase !== 'idle') return false;
+      this.phase = 'running';
+      this.round = 1;
+      this._load(0, now);
+      this.guardAt = now;
+      this.queue.push({ type: 'turn', idx: 0, at: now, start: true });
+      return true;
+    },
+    tap: TurnTimer.prototype.tap,
+    next: function (now) {
+      this._sync(now);
+      if ((this.phase !== 'running' && this.phase !== 'flagged') || now - this.guardAt < this.guardMs) return false;
+      var nx = this.nextIndex(this.idx);
+      if (nx === 0) this.round++;
+      this.phase = 'running';
+      this._load(nx, now);   // 自分の時計はここで止まる（減った分は戻らない）
+      this.guardAt = now;
+      this.queue.push({ type: 'turn', idx: nx, at: now });
+      return true;
+    },
+    // 1人戻す: 今の人がこの手番で使った時間は返して、前の人の時計を動かす
+    back: function (now) {
+      this._sync(now);
+      if (this.phase === 'idle') return false;
+      var s = this.snap;
+      if (s && s.idx === this.idx) {
+        this.main[s.idx] = s.main;
+        this.inByo[s.idx] = s.inByo;
+        this.out[s.idx] = s.out;
+      }
+      var was = this.idx, pv = this.prevIndex(was);
+      if (was === 0) this.round = Math.max(1, this.round - 1);
+      this.phase = this.phase === 'paused' ? 'paused' : 'running';
+      this._load(pv, now);
+      this.queue.push({ type: 'turn', idx: pv, at: now, back: true });
+      return true;
+    },
+    pause: function (now) {
+      this._sync(now);
+      if (this.phase !== 'running') return false;
+      if (!this.out[this.idx]) this.rem = Math.max(0, this.end - now);
+      this.lastRem = this.rem;
+      this.phase = 'paused';
+      return true;
+    },
+    resume: TurnTimer.prototype.resume,
+    togglePause: TurnTimer.prototype.togglePause,
+    view: function (now) {
+      this._sync(now);
+      var c = this.cfg, i = this.idx;
+      var remain = this.out[i] ? 0 : (this.phase === 'running' ? Math.max(0, this.end - now) : this.rem);
+      var players = [];
+      for (var k = 0; k < 6; k++) players.push({ main: this.main[k], inByo: this.inByo[k], out: this.out[k], len: this.budget[k] });
+      var order = [];   // ほかの人を、次の人から順に
+      for (var j = this.nextIndex(i), g = 0; g < 6 && j !== i && order.length < c.n; g++, j = this.nextIndex(j)) order.push(j);
+      return {
+        kind: 'clock', phase: this.phase, idx: i, n: c.n, round: this.round,
+        remain: remain, len: this.len, frac: this.len > 0 ? remain / this.len : 0,
+        inByo: this.inByo[i], out: this.out[i], byo: c.byo,
+        players: players, order: order,
+        warn: this.phase === 'running' && !this.out[i] && remain <= c.countFrom * 1000,
+        countFrom: c.countFrom
+      };
+    }
+  };
+
+  root.DTEngine = {
+    version: '0.1',
+    LATE_MS: LATE_MS,
+    GUARD_MS: GUARD_MS,
+    randomInt: randomInt,
+    rollDie: rollDie,
+    layoutDice: layoutDice,
+    formatTime: formatTime,
+    cueList: cueList,
+    TurnTimer: TurnTimer,
+    ClockTimer: ClockTimer
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+
+<script>
+/* 画面の動き。時間と乱数の計算は上の engine（window.DTEngine）にまかせる */
+(function () {
+  'use strict';
+  var E = window.DTEngine;
+  if (!E) return;
+  var $ = function (id) { return document.getElementById(id); };
+  var app = $('app');
+  var stage = $('dice-stage');
+  var onceLabel = $('once-label');
+  var sheet = $('sheet');
+  var scrim = $('scrim');
+  var srLive = $('sr-live');
+  var reducedMQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  var reduced = function () { return !!(reducedMQ && reducedMQ.matches); };
+
+  /* ===== 人の色（名前は入れない。色で区別する） ===== */
+  var COLORS = [
+    { name: '赤', css: 'var(--p-red)' },
+    { name: '青', css: 'var(--p-blue)' },
+    { name: '白', css: 'var(--p-white)' },
+    { name: 'オレンジ', css: 'var(--p-orange)' },
+    { name: '緑', css: 'var(--p-green)' },
+    { name: '茶', css: 'var(--p-brown)' }
+  ];
+
+  /* ===== 設定（この端末のブラウザに保存。読めなくても初期値で動く） ===== */
+  var KEY = 'dice-timer.v1';
+  function defaults() {
+    return {
+      mode: 'dice', count: 2,
+      sound: true, diceSound: true, half: true, countFrom: 3, silentPlay: true,
+      ttype: 'turn', nA: 4, secs: [20, 20, 20, 20, 20, 20],
+      nB: 4, mins: [10, 10, 10, 10, 10, 10], byo: 0,
+      colors: [0, 1, 2, 3, 4, 5]
+    };
+  }
+  function clampInt(v, lo, hi, fb) {
+    if (v === null || v === undefined || v === '') return fb;
+    var n = Math.round(Number(v));
+    if (!Number.isFinite(n)) return fb;
+    return Math.min(hi, Math.max(lo, n));
+  }
+  function loadSettings() {
+    var s = defaults(), raw = null;
+    try { raw = JSON.parse(window.localStorage.getItem(KEY) || 'null'); } catch (e) { raw = null; }
+    if (!raw || typeof raw !== 'object') return s;
+    if (raw.mode === 'dice' || raw.mode === 'both' || raw.mode === 'timer') s.mode = raw.mode;
+    s.count = clampInt(raw.count, 1, 6, s.count);
+    ['sound', 'diceSound', 'half', 'silentPlay'].forEach(function (k) { if (typeof raw[k] === 'boolean') s[k] = raw[k]; });
+    if (raw.countFrom === 3 || raw.countFrom === 5) s.countFrom = raw.countFrom;
+    if (raw.ttype === 'turn' || raw.ttype === 'clock') s.ttype = raw.ttype;
+    s.nA = clampInt(raw.nA, 1, 6, s.nA);
+    s.nB = clampInt(raw.nB, 2, 6, s.nB);
+    if (Array.isArray(raw.secs)) s.secs = s.secs.map(function (d, i) { return clampInt(raw.secs[i], 1, 999, d); });
+    if (Array.isArray(raw.mins)) s.mins = s.mins.map(function (d, i) { return clampInt(raw.mins[i], 1, 180, d); });
+    if (raw.byo === 0 || raw.byo === 10 || raw.byo === 30 || raw.byo === 60) s.byo = raw.byo;
+    if (Array.isArray(raw.colors) && raw.colors.length === 6 && raw.colors.every(function (v) { return Number.isInteger(v); }) &&
+        raw.colors.slice().sort().join(',') === '0,1,2,3,4,5') s.colors = raw.colors.slice();
+    return s;
+  }
+  var settings = loadSettings();
+  function save() {
+    try { window.localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) { /* 保存できない端末でも、そのまま動く */ }
+  }
+
+  /* ===== 時計（performance.now()。端末が眠って止まっていた分は Date.now() との差で足す） ===== */
+  var skew = 0, lastP = performance.now(), lastD = Date.now();
+  function now() {
+    var p = performance.now(), d = Date.now();
+    var gap = (d - lastD) - (p - lastP);
+    if (gap > 1500 && gap < 43200000) skew += gap;
+    lastP = p;
+    lastD = d;
+    return p + skew;
+  }
+
+  /* ===== タイマー ===== */
+  function timerConfig() {
+    return settings.ttype === 'clock'
+      ? { n: settings.nB, mins: settings.mins, byo: settings.byo, countFrom: settings.countFrom }
+      : { n: settings.nA, secs: settings.secs, countFrom: settings.countFrom };
+  }
+  function makeTimer() {
+    return settings.ttype === 'clock' ? new E.ClockTimer(timerConfig()) : new E.TurnTimer(timerConfig());
+  }
+  var timer = makeTimer();
+  function pushConfig() { timer.setConfig(timerConfig()); }
+
+  /* ===== 音（Web Audio でその場で作る。最初に画面に触ったときに用意する） ===== */
+  var snd = { ctx: null, out: null, noise: null };
+  function applyAudioSession() {
+    // iPhone のマナーモードでも鳴らす: 'playback' にすると消音スイッチでも鳴る（ほかのアプリの音楽を止めることがある）
+    try {
+      if ('audioSession' in navigator && navigator.audioSession) {
+        navigator.audioSession.type = (settings.sound && settings.silentPlay) ? 'playback' : 'auto';
+      }
+    } catch (e) { /* 対応していない端末は何もしない */ }
+  }
+  function createAudio() {
+    if (snd.ctx) return snd.ctx;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    try {
+      var c = new AC();
+      var len = Math.floor(c.sampleRate * 1.0);
+      var buf = c.createBuffer(1, len, c.sampleRate);
+      var d = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      var comp = c.createDynamicsCompressor();
+      comp.threshold.value = -12;
+      comp.knee.value = 6;
+      comp.ratio.value = 6;
+      comp.attack.value = 0.002;
+      comp.release.value = 0.1;
+      var out = c.createGain();
+      out.gain.value = 0.9;
+      out.connect(comp);
+      comp.connect(c.destination);
+      snd.ctx = c;
+      snd.out = out;
+      snd.noise = buf;
+    } catch (e) { return null; }
+    return snd.ctx;
+  }
+  function resumeAudio(c) {
+    try { var p = c.resume(); if (p && p.catch) p.catch(function () { /* 次の操作でもう一度 */ }); } catch (e) { /* 同上 */ }
+  }
+  function wakeAudio() {
+    if (!settings.sound) return;
+    applyAudioSession();
+    var c = createAudio();
+    if (c && c.state !== 'running') resumeAudio(c);
+  }
+  function ready() {
+    if (!settings.sound || !snd.ctx) return null;
+    if (snd.ctx.state !== 'running') resumeAudio(snd.ctx);
+    return snd.ctx;
+  }
+  function envelope(g, t, peak, attack, decay) {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+  }
+  function tone(c, type, f0, f1, t, attack, decay, peak) {
+    var o = c.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + attack + decay);
+    var g = c.createGain();
+    envelope(g, t, peak, attack, decay);
+    o.connect(g);
+    g.connect(snd.out);
+    o.start(t);
+    o.stop(t + attack + decay + 0.03);
+  }
+  function hiss(c, t, dur, ftype, freq, q, peak) {
+    var s = c.createBufferSource();
+    s.buffer = snd.noise;
+    var f = c.createBiquadFilter();
+    f.type = ftype;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    var g = c.createGain();
+    envelope(g, t, peak, 0.002, dur);
+    s.connect(f);
+    f.connect(g);
+    g.connect(snd.out);
+    s.start(t, Math.random() * 0.5);
+    s.stop(t + dur + 0.03);
+  }
+  // カタン（全部のサイコロが止まった瞬間に1回だけ。転がっている間は鳴らさない）
+  function playKatan(n) {
+    if (!settings.diceSound) return;
+    var c = ready();
+    if (!c) return;
+    try {
+      var t = c.currentTime + 0.004, j = 0.94 + Math.random() * 0.12;
+      // カタ: 卓に当たる硬い音
+      hiss(c, t, 0.02, 'bandpass', 3000 * j, 1.5, 0.4);
+      tone(c, 'triangle', 1800 * j, 1400 * j, t, 0.001, 0.03, 0.15);
+      tone(c, 'sine', 300 * j, 150 * j, t, 0.002, 0.075, 0.45);
+      // 個数が多いときは、少しずれて当たる音を足す（最大3つ）
+      for (var k = 1; k < Math.min(n, 4); k++) {
+        hiss(c, t + 0.006 + Math.random() * 0.03, 0.012, 'bandpass', 2300 + Math.random() * 1600, 1.8, 0.16);
+      }
+      // ン: 止まるときの小さな音
+      var t2 = t + 0.07 + Math.random() * 0.015;
+      hiss(c, t2, 0.014, 'bandpass', 2500 * j, 1.5, 0.2);
+      tone(c, 'sine', 260 * j, 140 * j, t2, 0.002, 0.06, 0.26);
+    } catch (e) { /* 鳴らなくても目は出る */ }
+  }
+  // ポーン（残り半分）
+  function playPon() {
+    var c = ready();
+    if (!c) return;
+    try {
+      var t = c.currentTime + 0.005;
+      tone(c, 'sine', 880, 0, t, 0.006, 0.95, 0.34);
+      tone(c, 'sine', 1760, 0, t, 0.004, 0.45, 0.07);
+      tone(c, 'sine', 1320, 0, t, 0.006, 0.6, 0.05);
+    } catch (e) { /* 鳴らなくても時計はそのまま */ }
+  }
+  // ピッ（残り 3・2・1）
+  function playPi() {
+    var c = ready();
+    if (!c) return;
+    try {
+      var t = c.currentTime + 0.004;
+      tone(c, 'square', 1046, 0, t, 0.003, 0.085, 0.08);
+      tone(c, 'sine', 1046, 0, t, 0.003, 0.1, 0.22);
+    } catch (e) { /* 同上 */ }
+  }
+  // 同じ高さでのばす音（立ち上がり → 保つ → 消える）
+  function hold(c, type, f, t, attack, sustain, release, peak) {
+    var o = c.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(f, t);
+    var g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + attack);
+    g.gain.setValueAtTime(peak, t + attack + sustain);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + attack + sustain + release);
+    o.connect(g);
+    g.connect(snd.out);
+    o.start(t);
+    o.stop(t + attack + sustain + release + 0.03);
+  }
+  // ピーーッ（0秒＝時間切れで、自動で次の人へ。カウントの「ピッ」より高く、長くのばす）
+  function playZero() {
+    var c = ready();
+    if (!c) return;
+    try {
+      var t = c.currentTime + 0.004;
+      hold(c, 'sine', 1568, t, 0.005, 0.42, 0.12, 0.24);
+      hold(c, 'square', 1568, t, 0.005, 0.42, 0.12, 0.06);
+      hold(c, 'sine', 784, t, 0.005, 0.42, 0.12, 0.08);
+    } catch (e) { /* 鳴らなくても時計はそのまま */ }
+  }
+  // ピピピッ（持ち時間の時間切れ）
+  function playTimeout() {
+    var c = ready();
+    if (!c) return;
+    try {
+      var t = c.currentTime + 0.005;
+      [0, 0.13, 0.26].forEach(function (d, i) {
+        var dur = i === 2 ? 0.2 : 0.075;
+        tone(c, 'square', 1760, 0, t + d, 0.003, dur, 0.09);
+        tone(c, 'sine', 1760, 0, t + d, 0.003, dur, 0.22);
+      });
+    } catch (e) { /* 同上 */ }
+  }
+
+  /* ===== 画面を消さない（断られても、そのまま動く） ===== */
+  var wakeLock = null, wakeWanted = false, wakeState = 'wait', wakeTried = 0;
+  function renderWake() {
+    var t = {
+      wait: '画面を消さない: 最初に画面を押すと有効になります',
+      on: '画面を消さない: 有効',
+      off: '画面を消さない: この端末では使えません（画面の自動ロックに気をつけてね）'
+    }[wakeState];
+    var el = $('wake-status');
+    if (el.textContent !== t) el.textContent = t;
+  }
+  function askWake() {
+    wakeTried = Date.now();
+    try {
+      return navigator.wakeLock.request('screen').then(function (s) {
+        wakeLock = s;
+        s.addEventListener('release', function () { if (wakeLock === s) wakeLock = null; });
+        return true;
+      }, function () { return false; });
+    } catch (e) { return Promise.resolve(false); }
+  }
+  function wantWake() {
+    var can = navigator.wakeLock && typeof navigator.wakeLock.request === 'function';
+    if (!wakeWanted) {
+      wakeWanted = true;
+      if (!can) { wakeState = 'off'; renderWake(); return; }
+    } else if (!can || wakeLock || Date.now() - wakeTried < 10000) {
+      return;   // もう効いている／少し前に頼んだばかり
+    }
+    askWake().then(function (ok) { wakeState = ok ? 'on' : 'off'; renderWake(); });
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible') return;
+    if (wakeWanted && !wakeLock && navigator.wakeLock && typeof navigator.wakeLock.request === 'function') {
+      askWake().then(function (ok) { wakeState = ok ? 'on' : 'off'; renderWake(); });
+    }
+    now();
+    kick();
+  });
+  // 最初に触ったとき（とその後も毎回）: 音の用意と画面を消さない要求
+  function onGesture() { wakeAudio(); wantWake(); }
+  ['pointerup', 'touchend', 'click', 'keydown'].forEach(function (type) {
+    document.addEventListener(type, onGesture, { capture: true, passive: true });
+  });
+
+  /* ===== サイコロ ===== */
+  var dice = { faces: [], els: [], rolling: false, rolls: 0, once: 0 };
+  var PIPS = ['tl', 'tr', 'ml', 'c', 'mr', 'bl', 'br'];
+  function makeDie() {
+    var d = document.createElement('div');
+    d.className = 'die';
+    PIPS.forEach(function (k) {
+      var p = document.createElement('i');
+      p.className = 'pip ' + k;
+      d.appendChild(p);
+    });
+    stage.appendChild(d);
+    return d;
+  }
+  function layoutDice() {
+    var n = dice.faces.length;
+    while (dice.els.length < n) dice.els.push(makeDie());
+    while (dice.els.length > n) dice.els.pop().remove();
+    stage.dataset.count = String(n);
+    var W = stage.clientWidth, H = stage.clientHeight;
+    if (!W || !H) return;
+    var vmin = Math.min(window.innerWidth, window.innerHeight);
+    var maxSize = Math.max(56, Math.min(230, vmin * 0.46));
+    var L = E.layoutDice(n, W, H, { maxSize: maxSize, only: (n === 2 && settings.mode === 'both') ? 'row' : null });
+    stage.dataset.shape = L.shape;
+    dice.els.forEach(function (el, i) {
+      var p = L.items[i];
+      el.style.fontSize = L.size.toFixed(1) + 'px';
+      el.style.left = (p.x - L.size / 2).toFixed(1) + 'px';
+      el.style.top = (p.y - L.size / 2).toFixed(1) + 'px';
+      if (!dice.rolling) el.dataset.face = String(dice.faces[i]);
+    });
+  }
+  function showCount(n) {   // n 個を並べる（足りない分は新しく振った目で。転がしはしない）
+    while (dice.faces.length < n) dice.faces.push(E.rollDie());
+    dice.faces.length = n;
+    layoutDice();
+  }
+  function updateCountUI() {
+    var n = settings.count;
+    $('count-num').textContent = n + '個';
+    $('count-minus').disabled = n <= 1;
+    $('count-plus').disabled = n >= 6;
+  }
+  function updateQuick() {
+    for (var k = 1; k <= 6; k++) {
+      var b = $('quick-' + k);
+      var usual = k === settings.count;
+      b.classList.toggle('is-usual', usual);
+      b.querySelector('.q-tag').hidden = !usual;
+      b.setAttribute('aria-pressed', String(dice.once === k));
+      b.setAttribute('aria-label', 'この回だけ ' + k + '個で振る' + (usual ? '（いつもの個数）' : ''));
+    }
+    onceLabel.hidden = !dice.once;
+    onceLabel.textContent = dice.once ? 'この回だけ ' + dice.once + '個' : '';
+  }
+  function changeCount(d) {
+    if (dice.rolling) return;
+    var n = Math.min(6, Math.max(1, settings.count + d));
+    if (n === settings.count) return;
+    settings.count = n;
+    save();
+    dice.once = 0;
+    showCount(n);
+    updateCountUI();
+    updateQuick();
+  }
+  // 振る。quickN があれば「この回だけ」その個数（次にふつうに押すと、いつもの個数に戻る）
+  function roll(quickN) {
+    if (dice.rolling) return false;   // 転がっている間の押しは無視
+    var usual = settings.count;
+    var n = quickN || usual;
+    dice.once = quickN && quickN !== usual ? quickN : 0;
+    dice.faces = [];
+    for (var i = 0; i < n; i++) dice.faces.push(E.rollDie());
+    dice.rolling = true;
+    app.dataset.rolling = '1';
+    layoutDice();
+    updateQuick();
+    dice.rolls++;
+    stage.dataset.rolls = String(dice.rolls);
+    var calm = reduced();
+    // 全部のサイコロが同じ時刻に止まる（目がそろって出て、そこで「カタン」）
+    var dur = calm ? 260 : 550;
+    var durs = dice.faces.map(function () { return dur; });
+    var stopped = durs.map(function () { return false; });
+    var flipAt = durs.map(function () { return 0; });
+    dice.els.forEach(function (el, k) {
+      el.dataset.face = String(1 + E.randomInt(6));
+      if (calm || typeof el.animate !== 'function') return;
+      var dir = E.randomInt(2) ? 1 : -1;
+      var a = dir * (18 + E.randomInt(18)), b = -dir * (6 + E.randomInt(8)), dx = (E.randomInt(9) - 4) * 2;
+      try {
+        el.animate([
+          { transform: 'translate(' + dx + '%, -16%) rotate(' + a + 'deg) scale(.86)' },
+          { transform: 'translate(' + (-dx / 2) + '%, 0) rotate(' + b + 'deg) scale(1.03)', offset: 0.42 },
+          { transform: 'translate(0, -7%) rotate(' + (-b / 2) + 'deg) scale(1)', offset: 0.66 },
+          { transform: 'translate(0, 0) rotate(0deg) scale(1)', offset: 0.84 },
+          { transform: 'translate(0, -2%) rotate(0deg) scale(1)', offset: 0.92 },
+          { transform: 'translate(0, 0) rotate(0deg) scale(1)' }
+        ], { duration: durs[k], easing: 'cubic-bezier(.25, .7, .3, 1)' });
+      } catch (e) { /* 動かなくても目は出る */ }
+    });
+    var t0 = performance.now();
+    function step() {
+      var t = performance.now() - t0, all = true;
+      dice.els.forEach(function (el, k) {
+        if (stopped[k]) return;
+        if (t >= durs[k]) {
+          stopped[k] = true;
+          el.dataset.face = String(dice.faces[k]);
+          return;
+        }
+        all = false;
+        if (t - flipAt[k] >= 65) {
+          flipAt[k] = t;
+          var f = 1 + E.randomInt(6);
+          if (String(f) === el.dataset.face) f = f % 6 + 1;
+          el.dataset.face = String(f);
+        }
+      });
+      if (!all) { requestAnimationFrame(step); return; }
+      playKatan(n);
+      dice.rolling = false;
+      app.dataset.rolling = '0';
+      srLive.textContent = '出た目 ' + dice.faces.join('、');
+    }
+    requestAnimationFrame(step);
+    return true;
+  }
+  function buildQuick() {
+    var nav = $('quick');
+    for (var k = 1; k <= 6; k++) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'q-btn';
+      b.id = 'quick-' + k;
+      b.dataset.n = String(k);
+      var num = document.createElement('span');
+      num.className = 'q-n';
+      num.textContent = String(k);
+      var tag = document.createElement('span');
+      tag.className = 'q-tag';
+      tag.textContent = 'いつも';
+      tag.hidden = true;
+      b.append(num, tag);
+      b.addEventListener('click', (function (n) { return function () { roll(n); }; })(k));
+      nav.appendChild(b);
+    }
+  }
+
+  /* ===== タイマーの表示 ===== */
+  var ui = {
+    who: $('t-who'), round: $('t-round'), num: $('t-num'), sub: $('t-sub'), list: $('t-list'), hint: $('t-hint'),
+    pause: $('t-pause'), back: $('t-back'), next: $('t-next'),
+    ringBar: $('ring-bar'), ringTrack: $('ring-track'), ring: $('ring'), ringWrap: $('ring-wrap')
+  };
+  var shown = {};   // 前の表示（同じなら DOM を触らない）
+  function setText(el, key, s) { if (shown[key] !== s) { shown[key] = s; el.textContent = s; } }
+  function setData(key, v) { if (app.dataset[key] !== v) app.dataset[key] = v; }
+  function shapeOf(t) {
+    if (/^[0-9]{1,2}$/.test(t)) return 's2';
+    if (/^[0-9]:[0-9]{2}$/.test(t)) return 'm1';
+    if (/^[0-9]{2}:[0-9]{2}$/.test(t)) return 'm2';
+    if (/^[0-9]+:[0-9]{2}:[0-9]{2}$/.test(t)) return 'h';
+    return 'txt';
+  }
+  function colorOf(idx) { return COLORS[settings.colors[idx]] || COLORS[0]; }
+  function renderTimer(v) {
+    var col = colorOf(v.idx);
+    if (shown.pc !== col.css) { shown.pc = col.css; app.style.setProperty('--pc', col.css); }
+    setData('phase', v.phase);
+    setData('idx', String(v.idx));
+    setData('round', String(v.round));
+    var clock = v.kind === 'clock';
+    var out = clock && v.out;
+    setData('out', out ? '1' : '0');
+    var text = out ? '時間切れ' : (clock && !v.inByo ? E.formatTime(v.remain, 'clock') : E.formatTime(v.remain, 'turn'));
+    setText(ui.num, 'num', text);
+    var shape = shapeOf(text);
+    if (ui.num.dataset.shape !== shape) ui.num.dataset.shape = shape;
+    setText(ui.who, 'who', col.name + 'の番' + (out ? ' ・ 時間切れ' : (clock && v.inByo ? ' ・ 秒読み' : '')));
+    setText(ui.round, 'round', (!clock && v.n === 1) ? v.round + '回目' : v.round + '周目');
+    if (!clock) {
+      if (!ui.list.hidden) ui.list.hidden = true;
+      var nc = colorOf(v.nextIdx);
+      setText(ui.sub, 'sub', v.n >= 2 ? '次 ' + nc.name + ' ' + E.formatTime(v.nextLen, 'turn') : '');
+    } else {
+      if (ui.list.hidden) ui.list.hidden = false;
+      setText(ui.sub, 'sub', v.byo ? '秒読み ' + v.byo + '秒' : '秒読みなし');
+      renderChips(v);
+    }
+    var hint = {
+      idle: 'タップでスタート',
+      running: 'タップで次の人へ',
+      paused: '一時停止中 ・ タップで再開',
+      flagged: '時間切れ ・ タップで次の人へ'
+    }[v.phase];
+    setText(ui.hint, 'hint', hint);
+    var label = { idle: 'スタート', running: '次の人へ', paused: '再開', flagged: '次の人へ' }[v.phase];
+    if (ui.next.getAttribute('aria-label') !== label) ui.next.setAttribute('aria-label', label);
+    var idle = v.phase === 'idle';
+    if (ui.back.hidden !== idle) ui.back.hidden = idle;
+    if (ui.pause.hidden !== idle) ui.pause.hidden = idle;
+    var canPause = v.phase === 'running' || v.phase === 'paused';
+    if (ui.pause.disabled === canPause) ui.pause.disabled = !canPause;
+    setText(ui.pause, 'pause', v.phase === 'paused' ? '再開' : '一時停止');
+    drawRing(out ? 0 : v.frac);
+    // 残りがカウントの秒数を切ったら、1秒の後ろ半分だけ薄くする（ピッと同時に明るくなる）
+    var sub = v.remain % 1000;
+    setData('blink', v.warn ? ((sub > 0 && sub <= 500) ? 'off' : 'on') : '');
+  }
+  function renderChips(v) {
+    var parts = v.order.map(function (k) {
+      var p = v.players[k];
+      return { k: k, c: colorOf(k), out: p.out, t: p.out ? '時間切れ' : (p.inByo ? '秒読み' : E.formatTime(p.main, 'clock')) };
+    });
+    var key = parts.map(function (p) { return p.k + ':' + p.c.name + ':' + p.t; }).join('|');
+    if (shown.chips === key) return;
+    shown.chips = key;
+    ui.list.textContent = '';
+    parts.forEach(function (p) {
+      var s = document.createElement('span');
+      s.className = 'chip' + (p.out ? ' is-out' : '');
+      var d = document.createElement('i');
+      d.className = 'chip-dot';
+      d.style.background = p.c.css;
+      s.append(d, p.t);
+      s.setAttribute('aria-label', p.c.name + ' ' + p.t);
+      ui.list.appendChild(s);
+    });
+  }
+  var ringFrac = -1;
+  function drawRing(frac) {
+    var f = Math.max(0, Math.min(1, frac));
+    if (Math.abs(f - ringFrac) < 0.0004) return;
+    ringFrac = f;
+    ui.ringBar.style.strokeDashoffset = String(-(1 - f) * 1000);
+    ui.ringBar.toggleAttribute('hidden', f <= 0.0005);   // 残り0の線は出さない
+  }
+  // ふちの線: 角丸の四角を、上の真ん中から時計回りに1周（pathLength=1000）
+  function sizeRing() {
+    var w = ui.ringWrap.clientWidth, h = ui.ringWrap.clientHeight;
+    if (!w || !h) return;
+    var sw = parseFloat(getComputedStyle(app).getPropertyValue('--ring-w')) || 10;
+    var o = 3 + sw / 2;
+    var r = Math.max(0, Math.min(34, (Math.min(w, h) - 2 * o) / 2));
+    var x0 = o, y0 = o, x1 = w - o, y1 = h - o, cx = w / 2;
+    var f = function (n) { return Math.round(n * 10) / 10; };
+    var d = 'M' + f(cx) + ' ' + f(y0) + ' H' + f(x1 - r) + ' A' + f(r) + ' ' + f(r) + ' 0 0 1 ' + f(x1) + ' ' + f(y0 + r) +
+      ' V' + f(y1 - r) + ' A' + f(r) + ' ' + f(r) + ' 0 0 1 ' + f(x1 - r) + ' ' + f(y1) +
+      ' H' + f(x0 + r) + ' A' + f(r) + ' ' + f(r) + ' 0 0 1 ' + f(x0) + ' ' + f(y1 - r) +
+      ' V' + f(y0 + r) + ' A' + f(r) + ' ' + f(r) + ' 0 0 1 ' + f(x0 + r) + ' ' + f(y0) + ' Z';
+    ui.ring.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    ui.ringTrack.setAttribute('d', d);
+    ui.ringBar.setAttribute('d', d);
+  }
+
+  function onTimerEvent(ev) {
+    if (!settings.sound) return;
+    if (ev.type === 'half') { if (settings.half) playPon(); }
+    else if (ev.type === 'count') playPi();
+    else if (ev.type === 'timeout') playTimeout();
+    else if (ev.type === 'turn' && ev.auto) playZero();
+    // 押して次へ進んだときと 'byo'（秒読みへ）は鳴らさない。色が変わるのが合図
+  }
+  var raf = 0;
+  function timerShown() { return settings.mode !== 'dice'; }
+  function frame() {
+    raf = 0;
+    if (!timerShown() || document.hidden) return;
+    var t = now();
+    timer.tick(t).forEach(onTimerEvent);
+    renderTimer(timer.view(t));
+    if (timer.phase === 'running') raf = requestAnimationFrame(frame);
+  }
+  function kick() {
+    if (raf || !timerShown() || document.hidden) return;
+    raf = requestAnimationFrame(frame);
+  }
+  function renderNow() {
+    if (!timerShown()) return;
+    var t = now();
+    timer.tick(t).forEach(onTimerEvent);
+    renderTimer(timer.view(t));
+    kick();
+  }
+  function timerTap() {
+    var r = timer.tap(now());
+    if (r !== 'ignored') renderNow();
+  }
+
+  /* ===== 画面のモード ===== */
+  function applyMode() {
+    var m = settings.mode;
+    app.dataset.mode = m;
+    $('timer-pane').hidden = m === 'dice';
+    $('dice-pane').hidden = m === 'timer';
+    $('quick').hidden = m === 'timer';
+    $('count-box').hidden = m === 'timer';
+    ui.ringWrap.hidden = m === 'dice';
+    if (m === 'dice' && timer.phase === 'running') timer.pause(now());   // サイコロだけの画面では時計を止めておく
+    layoutDice();
+    sizeRing();
+    renderNow();
+  }
+
+  /* ===== 設定シート ===== */
+  var sheetOpen = false, lastFocus = null, closeTimer = 0;
+  function activeN() { return settings.ttype === 'clock' ? settings.nB : settings.nA; }
+  function buildPlayerRows() {
+    var list = $('p-list');
+    for (var i = 1; i <= 6; i++) {
+      var row = document.createElement('div');
+      row.className = 'p-row';
+      row.id = 'p-row-' + i;
+      var color = document.createElement('button');
+      color.type = 'button';
+      color.className = 'p-color';
+      color.id = 'p-color-' + i;
+      var dot = document.createElement('i');
+      dot.className = 'p-dot';
+      dot.setAttribute('aria-hidden', 'true');
+      var no = document.createElement('span');
+      no.className = 'p-no';
+      no.textContent = String(i);
+      color.append(dot, no);
+      var minus = document.createElement('button');
+      minus.type = 'button';
+      minus.className = 'step';
+      minus.id = 'p-minus-' + i;
+      var input = document.createElement('input');
+      input.type = 'number';
+      input.className = 'p-time';
+      input.id = 'p-time-' + i;
+      input.inputMode = 'numeric';
+      input.min = '1';
+      input.step = '1';
+      input.autocomplete = 'off';
+      var plus = document.createElement('button');
+      plus.type = 'button';
+      plus.className = 'step';
+      plus.id = 'p-plus-' + i;
+      var unit = document.createElement('span');
+      unit.className = 'p-unit';
+      unit.id = 'p-unit-' + i;
+      unit.setAttribute('aria-hidden', 'true');
+      row.append(color, minus, input, plus, unit);
+      list.appendChild(row);
+      (function (slot) {
+        color.addEventListener('click', function () { cycleColor(slot); });
+        minus.addEventListener('click', function () { stepTime(slot, -1); });
+        plus.addEventListener('click', function () { stepTime(slot, 1); });
+        input.addEventListener('input', function () {
+          var v = Number(input.value);
+          var max = settings.ttype === 'clock' ? 180 : 999;
+          if (input.value !== '' && Number.isInteger(v) && v >= 1 && v <= max) setTime(slot, v, false);
+        });
+        input.addEventListener('change', function () { setTime(slot, input.value, true); });
+      })(i - 1);
+    }
+  }
+  function setTime(slot, val, fix) {
+    var clock = settings.ttype === 'clock';
+    if (clock) settings.mins[slot] = clampInt(val, 1, 180, settings.mins[slot]);
+    else settings.secs[slot] = clampInt(val, 1, 999, settings.secs[slot]);
+    save();
+    pushConfig();
+    if (fix) $('p-time-' + (slot + 1)).value = String(clock ? settings.mins[slot] : settings.secs[slot]);
+    renderNow();
+  }
+  function stepTime(slot, dir) {
+    var clock = settings.ttype === 'clock';
+    var cur = clock ? settings.mins[slot] : settings.secs[slot];
+    setTime(slot, cur + dir * (clock ? 1 : 5), true);
+  }
+  // 色を押すと、使っていない色と入れ替える（全色使っていたら、次の色の人と入れ替える）
+  function cycleColor(slot) {
+    var cols = settings.colors.slice(), n = activeN(), cur = cols[slot], owner, c;
+    for (var step = 1; step < 6; step++) {
+      c = (cur + step) % 6;
+      owner = cols.indexOf(c);
+      if (owner >= n) { cols[owner] = cur; cols[slot] = c; settings.colors = cols; save(); renderSheet(); renderNow(); return; }
+    }
+    c = (cur + 1) % 6;
+    owner = cols.indexOf(c);
+    cols[owner] = cur;
+    cols[slot] = c;
+    settings.colors = cols;
+    save();
+    renderSheet();
+    renderNow();
+  }
+  function renderSheet() {
+    var s = settings, clock = s.ttype === 'clock', n = activeN();
+    $('mode-' + s.mode).checked = true;
+    $('opt-sound').checked = s.sound;
+    $('opt-dice-sound').checked = s.diceSound;
+    $('opt-silent').checked = s.silentPlay;
+    $('opt-half').checked = s.half;
+    $('count-' + s.countFrom).checked = true;
+    $('ttype-' + s.ttype).checked = true;
+    $('players-' + n).checked = true;
+    $('players-1').disabled = clock;
+    $('byo-' + s.byo).checked = true;
+    $('byo-field').hidden = !clock;
+    $('timer-fields').hidden = s.mode === 'dice';
+    $('row-dice-sound').hidden = s.mode === 'timer';
+    $('times-title').textContent = clock ? '1人ずつの持ち時間（分）' : '1人ずつの秒数';
+    $('ttype-note').textContent = clock
+      ? '自分の番の間だけ、自分の持ち時間が減ります。押すと次の人の時計が動きます'
+      : '0秒になると、すぐ次の人の秒数で始まります（ずっとくり返し）。押すとすぐ次の人へ';
+    for (var i = 1; i <= 6; i++) {
+      $('p-row-' + i).hidden = i > n;
+      var c = COLORS[s.colors[i - 1]];
+      var btn = $('p-color-' + i);
+      btn.style.setProperty('--c', c.css);
+      btn.setAttribute('aria-label', i + '番の色 ' + c.name + '（押すと変わる）');
+      var inp = $('p-time-' + i);
+      inp.max = clock ? '180' : '999';
+      if (document.activeElement !== inp) inp.value = String(clock ? s.mins[i - 1] : s.secs[i - 1]);
+      inp.setAttribute('aria-label', i + '番の' + (clock ? '持ち時間（分）' : '秒数'));
+      $('p-minus-' + i).textContent = clock ? '−1' : '−5';
+      $('p-plus-' + i).textContent = clock ? '＋1' : '＋5';
+      $('p-minus-' + i).setAttribute('aria-label', i + '番を' + (clock ? '1分' : '5秒') + '減らす');
+      $('p-plus-' + i).setAttribute('aria-label', i + '番を' + (clock ? '1分' : '5秒') + '増やす');
+      $('p-unit-' + i).textContent = clock ? '分' : '秒';
+    }
+    $('clock-note').hidden = !(clock && timer.phase !== 'idle');
+    renderWake();
+  }
+  function openSheet() {
+    if (sheetOpen) return;
+    sheetOpen = true;
+    clearTimeout(closeTimer);
+    lastFocus = document.activeElement;
+    disarm();
+    renderSheet();
+    scrim.hidden = false;
+    sheet.hidden = false;
+    app.setAttribute('inert', '');
+    void sheet.offsetHeight;   // 出す前の位置を確定させてから、せり上げる
+    sheet.classList.add('open');
+    try { $('sheet-close').focus({ preventScroll: true }); } catch (e) { $('sheet-close').focus(); }
+  }
+  function closeSheet() {
+    if (!sheetOpen) return;
+    sheetOpen = false;
+    disarm();
+    sheet.classList.remove('open');
+    app.removeAttribute('inert');
+    scrim.hidden = true;
+    var done = function () { if (!sheetOpen) sheet.hidden = true; };
+    if (reduced()) done();
+    else closeTimer = setTimeout(done, 300);
+    var back = lastFocus && lastFocus.focus && document.contains(lastFocus) ? lastFocus : $('open-settings');
+    try { back.focus({ preventScroll: true }); } catch (e) { /* 戻せなくてもよい */ }
+  }
+  // ゲームの途中で「最初から」系を押したら、もう一度押してもらう（ページの中で確かめる）
+  var armed = null, armTimer = 0;
+  function disarm() {
+    clearTimeout(armTimer);
+    if (armed) {
+      armed.removeAttribute('data-armed');
+      armed.textContent = armed.dataset.label;
+      armed = null;
+    }
+    $('confirm-note').hidden = true;
+  }
+  function confirmThen(btn, fn) {
+    if (timer.phase === 'idle' || armed === btn) { disarm(); fn(); return; }
+    disarm();
+    armed = btn;
+    btn.setAttribute('data-armed', '');
+    btn.textContent = 'もう一度押す';
+    $('confirm-note').hidden = false;
+    armTimer = setTimeout(disarm, 4000);
+  }
+  function restartTimer() {   // 止めて1番・スタート前へ
+    pushConfig();
+    timer.reset();
+    renderNow();
+  }
+
+  /* ===== 押したときの振り分け ===== */
+  document.addEventListener('click', function (e) {
+    var t = e.target && e.target.closest ? e.target : null;
+    if (!t || sheetOpen) return;
+    if (t.closest('#sheet, #scrim, [data-no-roll]')) return;
+    var ctl = t.closest('button, input, label, select, textarea, a');
+    if (ctl) {
+      if (ctl.id === 't-next') timerTap();
+      return;
+    }
+    var m = settings.mode;
+    if (m === 'timer' || (m === 'both' && t.closest('#timer-pane'))) { timerTap(); return; }
+    roll(0);
+  });
+  stage.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); roll(0); }
+  });
+  $('count-minus').addEventListener('click', function () { changeCount(-1); });
+  $('count-plus').addEventListener('click', function () { changeCount(1); });
+  $('open-settings').addEventListener('click', openSheet);
+  $('sheet-close').addEventListener('click', closeSheet);
+  scrim.addEventListener('click', closeSheet);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && sheetOpen) { e.preventDefault(); closeSheet(); }
+  });
+  $('t-pause').addEventListener('click', function () { timer.togglePause(now()); renderNow(); });
+  $('t-back').addEventListener('click', function () { timer.back(now()); renderNow(); });
+  app.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  // 設定シートの部品
+  document.querySelectorAll('input[name="mode"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      if (!r.checked) return;
+      settings.mode = r.value;
+      save();
+      applyMode();
+      renderSheet();
+    });
+  });
+  document.querySelectorAll('input[name="ttype"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      if (!r.checked || settings.ttype === r.value) return;
+      settings.ttype = r.value;
+      save();
+      timer = makeTimer();   // 種類を変えたら、止めて1番・スタート前
+      disarm();
+      renderSheet();
+      renderNow();
+    });
+  });
+  document.querySelectorAll('input[name="players"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      if (!r.checked) return;
+      var n = Number(r.value);
+      if (settings.ttype === 'clock') settings.nB = Math.max(2, n); else settings.nA = n;
+      save();
+      pushConfig();
+      renderSheet();
+      renderNow();
+    });
+  });
+  document.querySelectorAll('input[name="byo"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      if (!r.checked) return;
+      settings.byo = Number(r.value);
+      save();
+      pushConfig();
+      renderNow();
+    });
+  });
+  document.querySelectorAll('input[name="countfrom"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      if (!r.checked) return;
+      settings.countFrom = Number(r.value) === 5 ? 5 : 3;
+      save();
+      pushConfig();
+      renderNow();
+    });
+  });
+  $('opt-sound').addEventListener('change', function (e) {
+    settings.sound = e.target.checked;
+    save();
+    applyAudioSession();
+    if (settings.sound) wakeAudio();
+  });
+  $('opt-dice-sound').addEventListener('change', function (e) { settings.diceSound = e.target.checked; save(); });
+  $('opt-half').addEventListener('change', function (e) { settings.half = e.target.checked; save(); });
+  $('opt-silent').addEventListener('change', function (e) { settings.silentPlay = e.target.checked; save(); applyAudioSession(); });
+  ['apply-start', 'reset-timer'].forEach(function (id) {
+    var b = $(id);
+    b.dataset.label = b.textContent;
+    b.addEventListener('click', function () { confirmThen(b, function () { restartTimer(); closeSheet(); }); });
+  });
+
+  /* ===== 大きさが変わったとき ===== */
+  function onResize() { layoutDice(); sizeRing(); }
+  if (typeof ResizeObserver === 'function') {
+    var ro = new ResizeObserver(onResize);
+    ro.observe(stage);
+    ro.observe(ui.ringWrap);
+  }
+  window.addEventListener('resize', onResize);
+  window.addEventListener('orientationchange', onResize);
+
+  /* ===== はじめ ===== */
+  buildQuick();
+  buildPlayerRows();
+  showCount(settings.count);
+  updateCountUI();
+  updateQuick();
+  applyMode();
+})();
+</script>

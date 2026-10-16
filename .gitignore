@@ -1,0 +1,17 @@
+# 公開しないもの（作業メモ・参考の素材・試験の撮影）
+_作業メモ_非公開.md
+_素材/
+shots/
+
+# node
+node_modules/
+npm-debug.log*
+
+# OS やエディタが作るもの
+.DS_Store
+Thumbs.db
+desktop.ini
+__pycache__/
+.vscode/
+.idea/
+*.swp
