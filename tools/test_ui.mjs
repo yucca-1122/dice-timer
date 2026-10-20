@@ -386,6 +386,17 @@ try {
   ok('タイマー欄を押してもサイコロは振れない', s.rolls === rollsBefore, String(s.rolls));
   const sub = await page.eval("document.getElementById('t-sub').textContent");
   ok('次の人と周を出す（「次 白 20」・1周目）', sub === '次 白 20' && s.round === 1, JSON.stringify([sub, s.round]));
+  const btnH = await page.eval("JSON.stringify(['t-pause', 't-back'].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().height)))");
+  ok('一時停止・1人戻すは高さ56px以上（押しそこねにくい大きさ）', JSON.parse(btnH).every((h) => h >= 56), btnH);
+  await sleep(500);   // 0.4秒の無視が明けてから
+  const footPts = await page.eval(`JSON.stringify((() => {
+    const f = document.querySelector('#timer-pane .t-foot').getBoundingClientRect();
+    const a = document.getElementById('t-back').getBoundingClientRect(), b = document.getElementById('t-pause').getBoundingClientRect();
+    return [[f.left + 12, f.top + f.height / 2], [(a.right + b.left) / 2, f.top + f.height / 2], [b.left + b.width / 2, b.top - 4]];
+  })())`);
+  for (const [x, y] of JSON.parse(footPts)) { await page.press(x, y); await sleep(80); }
+  s = await state();
+  ok('ボタンの段の、ボタンの横・ボタンの間・すぐ上の線を押しても次の人へ進まない', s.idx === 1 && s.phase === 'running', JSON.stringify([s.idx, s.phase]));
   await page.pressEl('#t-pause');
   await sleep(80);
   s = await state();
@@ -442,11 +453,17 @@ try {
   await page.press(195, 420);     // まん中
   await sleep(450);
   const i2 = (await state()).idx;
-  await page.press(60, 790);      // 左下（ボタン以外）
-  await sleep(80);
+  const footTop = await page.eval("Math.round(document.querySelector('#timer-pane .t-foot').getBoundingClientRect().top)");
+  await page.press(60, footTop - 40);   // 下のほう（ボタンの段より上）
+  await sleep(450);
   const i3 = (await state()).idx;
   const nA = 4;
   ok('タイマーだけの画面では、どこを押しても次へ（上・まん中・下）', i1 === (i0 + 1) % nA && i2 === (i1 + 1) % nA && i3 === (i2 + 1) % nA, JSON.stringify([i0, i1, i2, i3]));
+  await page.press(60, footTop + 30);   // ボタンの段の左（ボタンの横）
+  await sleep(80);
+  ok('… ボタンの段（一時停止・1人戻すの横）を押しても次へ進まない', (await state()).idx === i3, String((await state()).idx));
+  const tH = await page.eval("JSON.stringify(['t-pause', 't-back'].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().height)))");
+  ok('… タイマーだけの画面の一時停止・1人戻すは高さ64px以上', JSON.parse(tH).every((h) => h >= 64), tH);
   await sleep(2300);
   await page.shot('07_タイマーだけ.png');
 

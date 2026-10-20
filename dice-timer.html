@@ -443,12 +443,15 @@ input { font: inherit; color: inherit; -webkit-user-select: text; user-select: t
 .app[data-phase="paused"] .t-hint,
 .app[data-phase="flagged"] .t-hint { color: var(--accent); }
 .t-top, .t-foot { flex: none; }
+/* 下の段（一時停止・1人戻す）は、ボタンの横や間を押しても「次へ」にならない帯。線で「タップで次の人へ」の場所と分ける */
 .t-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 44px;
+  min-height: 56px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
 }
 .t-sub {
   flex: 1 1 auto;
@@ -465,7 +468,21 @@ input { font: inherit; color: inherit; -webkit-user-select: text; user-select: t
 .chip { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .chip-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--p-red); }
 .chip.is-out { color: var(--danger); }
-.t-btns { flex: none; display: flex; gap: 6px; }
+.t-btns { flex: none; display: flex; gap: 10px; }
+/* 一時停止・1人戻すは押しそこねないよう大きく（タイマーだけの画面はもうひと回り） */
+.t-btns .small-btn {
+  min-height: 56px;
+  min-width: 104px;
+  padding: 0 18px;
+  border-radius: 28px;
+  font-size: 16px;
+}
+.app[data-mode="timer"] .t-btns .small-btn {
+  min-height: 64px;
+  min-width: 120px;
+  border-radius: 32px;
+  font-size: 18px;
+}
 .small-btn {
   min-height: 44px;
   padding: 0 12px;
@@ -763,7 +780,7 @@ input { font: inherit; color: inherit; -webkit-user-select: text; user-select: t
     </div>
     <div id="t-list" class="t-list" aria-label="ほかの人の残り" hidden></div>
     <div id="t-hint" class="t-hint">タップでスタート</div>
-    <div class="t-foot">
+    <div class="t-foot" data-no-roll>
       <div id="t-sub" class="t-sub"></div>
       <div class="t-btns">
         <button type="button" id="t-back" class="small-btn">1人戻す</button>
