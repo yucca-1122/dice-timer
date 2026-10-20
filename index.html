@@ -472,7 +472,7 @@ input { font: inherit; color: inherit; -webkit-user-select: text; user-select: t
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 10px;
+  gap: 4px 6px;
   font-size: 14px;
   font-weight: 700;
   color: var(--muted);
@@ -480,6 +480,8 @@ input { font: inherit; color: inherit; -webkit-user-select: text; user-select: t
 }
 .chip { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .chip-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--p-red); }
+.t-sub .chip-dot { width: 12px; height: 12px; }
+.app[data-mode="timer"] .t-sub .chip-dot { width: 14px; height: 14px; }
 .chip.is-out { color: var(--danger); }
 .t-btns { flex: none; display: flex; gap: 10px; }
 /* 一時停止・1人戻すは押しそこねないよう大きく（タイマーだけの画面はもうひと回り） */
@@ -492,7 +494,7 @@ input { font: inherit; color: inherit; -webkit-user-select: text; user-select: t
 }
 .app[data-mode="timer"] .t-btns .small-btn {
   min-height: 64px;
-  min-width: 120px;
+  min-width: 112px;
   border-radius: 32px;
   font-size: 18px;
 }
@@ -1864,8 +1866,7 @@ input { font: inherit; color: inherit; -webkit-user-select: text; user-select: t
     setText(ui.round, 'round', (!clock && v.n === 1) ? v.round + '回目' : v.round + '周目');
     if (!clock) {
       if (!ui.list.hidden) ui.list.hidden = true;
-      var nc = colorOf(v.nextIdx);
-      setText(ui.sub, 'sub', v.n >= 2 ? '次 ' + nc.name + ' ' + E.formatTime(v.nextLen, 'turn') : '');
+      renderNext(v);
     } else {
       if (ui.list.hidden) ui.list.hidden = false;
       setText(ui.sub, 'sub', v.byo ? '秒読み ' + v.byo + '秒' : '秒読みなし');
@@ -1890,6 +1891,22 @@ input { font: inherit; color: inherit; -webkit-user-select: text; user-select: t
     // 残りがカウントの秒数を切ったら、1秒の後ろ半分だけ薄くする（ピッと同時に明るくなる）
     var sub = v.remain % 1000;
     setData('blink', v.warn ? ((sub > 0 && sub <= 500) ? 'off' : 'on') : '');
+  }
+  // 「次 ● 青 20」: 次の人の名前の前に、その人の色の丸（将棋式の一覧と同じ）
+  function renderNext(v) {
+    var nc = colorOf(v.nextIdx);
+    var key = v.n >= 2 ? 'next|' + nc.name + '|' + nc.css + '|' + v.nextLen : 'next|';
+    if (shown.sub === key) return;
+    shown.sub = key;
+    ui.sub.textContent = '';
+    if (v.n < 2) return;
+    var s = document.createElement('span');
+    s.className = 'chip';
+    var d = document.createElement('i');
+    d.className = 'chip-dot';
+    d.style.background = nc.css;
+    s.append(d, nc.name);
+    ui.sub.append('次 ', s, ' ' + E.formatTime(v.nextLen, 'turn'));
   }
   function renderChips(v) {
     var parts = v.order.map(function (k) {

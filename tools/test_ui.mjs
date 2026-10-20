@@ -386,6 +386,8 @@ try {
   ok('タイマー欄を押してもサイコロは振れない', s.rolls === rollsBefore, String(s.rolls));
   const sub = await page.eval("document.getElementById('t-sub').textContent");
   ok('次の人と周を出す（「次 白 20」・1周目）', sub === '次 白 20' && s.round === 1, JSON.stringify([sub, s.round]));
+  const subDot = await page.eval("(() => { const d = document.querySelector('#t-sub .chip-dot'); return d ? getComputedStyle(d).backgroundColor : ''; })()");
+  ok('… 次の人の名前の前に、その人の色の丸（白）', subDot === 'rgb(241, 241, 236)', subDot);
   const btnH = await page.eval("JSON.stringify(['t-pause', 't-back'].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().height)))");
   ok('一時停止・1人戻すは高さ56px以上（押しそこねにくい大きさ）', JSON.parse(btnH).every((h) => h >= 56), btnH);
   await sleep(500);   // 0.4秒の無視が明けてから
